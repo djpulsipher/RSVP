@@ -42,8 +42,50 @@ const loadScript = (src) => {
 
 const getORPIndex = (word) => {
   const length = word.length;
-  if (length === 1) return 0;
-  return Math.ceil(length / 2) - 1;
+  if (length <= 1) return 0;
+  if (length <= 5) return 1;
+  if (length <= 9) return 2;
+  if (length <= 13) return 3;
+  return 4;
+};
+
+const splitWord = (word) => {
+  const match = word.match(/^([^A-Za-z0-9]*)([A-Za-z0-9][A-Za-z0-9'’\-]*)([^A-Za-z0-9]*)$/);
+  if (!match) {
+    return { leading: "", core: word, trailing: "" };
+  }
+  return { leading: match[1], core: match[2], trailing: match[3] };
+};
+
+const getPauseMultiplier = (word) => {
+  const { trailing } = splitWord(word);
+  if (/[.?!…]+$/.test(trailing)) return 2.6;
+  if (/[:;]+$/.test(trailing)) return 1.9;
+  if (/,+$/.test(trailing)) return 1.4;
+  if (/—|–|--/.test(word)) return 1.6;
+  return 1;
+};
+
+const normalizeWords = (text) => {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter((word) => splitWord(word).core.length > 0);
+};
+
+const stripMarkdown = (text) => {
+  let cleaned = text;
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, " ");
+  cleaned = cleaned.replace(/`[^`]*`/g, " ");
+  cleaned = cleaned.replace(/!\[[^\]]*\]\([^)]+\)/g, " ");
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  cleaned = cleaned.replace(/^\s{0,3}#+\s*/gm, " ");
+  cleaned = cleaned.replace(/^\s{0,3}[*+-]\s+/gm, " ");
+  cleaned = cleaned.replace(/^\s{0,3}\d+\.\s+/gm, " ");
+  cleaned = cleaned.replace(/^\s*>+\s?/gm, " ");
+  cleaned = cleaned.replace(/-{3,}/g, " ");
+  cleaned = cleaned.replace(/\s+/g, " ");
+  return cleaned;
 };
 
 // Simple ID generator
@@ -360,7 +402,7 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState('Parsing...');
 
-  const intervalRef = useRef(null);
+  const timeoutRef = useRef(null);
   const epubRef = useRef(null);
 
   // --- Persistence inside Reader ---
@@ -437,7 +479,8 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target.result;
-        const cleanWords = text.trim().split(/\s+/).filter(w => w.length > 0);
+        const cleaned = stripMarkdown(text);
+        const cleanWords = normalizeWords(cleaned);
         resolve(cleanWords);
       };
       reader.onerror = reject;
@@ -487,7 +530,26 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
         try {
             const doc = await item.load(epubBook.load.bind(epubBook));
             let rawText = "";
-            
+
+            const removeSelector = (selector) => {
+              const nodes = doc.querySelectorAll(selector);
+              nodes.forEach((node) => node.remove());
+            };
+
+            removeSelector("script");
+            removeSelector("style");
+            removeSelector("nav");
+            removeSelector("noscript");
+            removeSelector("header");
+            removeSelector("footer");
+            removeSelector("svg");
+            removeSelector("[role='doc-toc']");
+            removeSelector("[role='navigation']");
+            removeSelector("[epub\\:type='toc']");
+            removeSelector("[epub\\:type='landmarks']");
+            removeSelector("#toc");
+            removeSelector(".toc");
+
             if (doc.body?.textContent) rawText = doc.body.textContent;
             else if (doc.documentElement?.textContent) rawText = doc.documentElement.textContent;
             else {
@@ -495,9 +557,9 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
                 for(let i=0; i<nodes.length; i++) rawText += (nodes[i].textContent + " ");
             }
 
-            const clean = rawText.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+            const clean = rawText.replace(/[\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
             if (clean.length > 0) {
-                const arr = clean.split(' ');
+                const arr = normalizeWords(clean);
                 fullWordList = fullWordList.concat(arr);
                 currentWordIndex += arr.length;
             }
@@ -554,30 +616,34 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
 
   // Interval
   useEffect(() => {
-      if (isPlaying && wpm > 0) {
-          const ms = 60000 / wpm;
-          intervalRef.current = setInterval(() => {
-              setCurrentIndex(prev => {
-                  if (prev >= words.length - 1) {
-                      setIsPlaying(false);
-                      return prev;
-                  }
-                  return prev + 1;
-              });
-          }, ms);
-      } else {
-          clearInterval(intervalRef.current);
+      if (!isPlaying || wpm <= 0 || words.length === 0) {
+          clearTimeout(timeoutRef.current);
+          return;
       }
-      return () => clearInterval(intervalRef.current);
-  }, [isPlaying, wpm, words.length]);
+
+      const current = words[currentIndex] || "";
+      const ms = (60000 / wpm) * getPauseMultiplier(current);
+      timeoutRef.current = setTimeout(() => {
+          setCurrentIndex(prev => {
+              if (prev >= words.length - 1) {
+                  setIsPlaying(false);
+                  return prev;
+              }
+              return prev + 1;
+          });
+      }, ms);
+
+      return () => clearTimeout(timeoutRef.current);
+  }, [isPlaying, wpm, words.length, currentIndex]);
 
 
   // --- Rendering ---
   const currentWord = words[currentIndex] || "";
-  const orp = getORPIndex(currentWord);
-  const leftPart = currentWord.slice(0, orp);
-  const centerChar = currentWord[orp];
-  const rightPart = currentWord.slice(orp + 1);
+  const { leading, core, trailing } = splitWord(currentWord);
+  const orp = getORPIndex(core || currentWord);
+  const leftPart = `${leading}${(core || currentWord).slice(0, orp)}`;
+  const centerChar = (core || currentWord)[orp] || "";
+  const rightPart = `${(core || currentWord).slice(orp + 1)}${trailing}`;
 
   const minutesLeft = wpm > 0 ? Math.floor((words.length - currentIndex) / wpm) : 0;
   const progressPercent = words.length > 0 ? Math.floor((currentIndex / words.length) * 100) : 0;
