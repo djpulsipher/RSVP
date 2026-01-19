@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import { 
   Play, 
   Pause, 
@@ -401,9 +401,11 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const [fontSize, setFontSize] = useState(64);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState('Parsing...');
+  const [wordScale, setWordScale] = useState(1);
 
   const timeoutRef = useRef(null);
   const epubRef = useRef(null);
+  const wordWrapperRef = useRef(null);
 
   // --- Persistence inside Reader ---
   useEffect(() => {
@@ -645,6 +647,29 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const centerChar = (core || currentWord)[orp] || "";
   const rightPart = `${(core || currentWord).slice(orp + 1)}${trailing}`;
 
+  useLayoutEffect(() => {
+    const updateScale = () => {
+      const node = wordWrapperRef.current;
+      if (!node) return;
+
+      const isMobile = window.matchMedia("(max-width: 767px)").matches;
+      if (!isMobile) {
+        if (wordScale !== 1) setWordScale(1);
+        return;
+      }
+
+      const maxWidth = Math.min(window.innerWidth * 0.92, node.parentElement?.clientWidth || window.innerWidth);
+      const actualWidth = node.scrollWidth;
+      const nextScale = actualWidth > maxWidth ? maxWidth / actualWidth : 1;
+      const clamped = Math.max(0.6, Math.min(1, nextScale));
+      if (clamped !== wordScale) setWordScale(clamped);
+    };
+
+    updateScale();
+    window.addEventListener("resize", updateScale);
+    return () => window.removeEventListener("resize", updateScale);
+  }, [currentWord, fontSize, wordScale]);
+
   const minutesLeft = wpm > 0 ? Math.floor((words.length - currentIndex) / wpm) : 0;
   const progressPercent = words.length > 0 ? Math.floor((currentIndex / words.length) * 100) : 0;
 
@@ -694,7 +719,16 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
             </div>
 
             {/* Word */}
-            <div className="font-serif flex items-baseline leading-none select-none relative" style={{ fontSize: `${fontSize}px` }}>
+            <div
+                ref={wordWrapperRef}
+                className="font-serif flex items-baseline leading-none select-none relative"
+                style={{
+                  fontSize: `${fontSize}px`,
+                  transform: `scale(${wordScale})`,
+                  transformOrigin: "center center",
+                  maxWidth: "92vw"
+                }}
+            >
                 <div className="flex justify-end w-[45vw] text-right whitespace-nowrap">{leftPart}</div>
                 <div className={`${darkMode ? 'text-red-500' : 'text-red-600'} font-bold w-auto text-center px-[1px]`}>{centerChar}</div>
                 <div className="flex justify-start w-[45vw] text-left whitespace-nowrap">{rightPart}</div>
