@@ -67,7 +67,11 @@ const getPauseMultiplier = (word) => {
 };
 
 const normalizeWords = (text) => {
-  return text
+  const normalized = text
+    .replace(/([A-Za-z0-9])([—–])([A-Za-z0-9])/g, "$1$2 $3")
+    .replace(/\s*([—–])\s*/g, " $1 ");
+
+  return normalized
     .trim()
     .split(/\s+/)
     .filter((word) => splitWord(word).core.length > 0);
