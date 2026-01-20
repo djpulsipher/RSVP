@@ -413,10 +413,12 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState('Parsing...');
   const [wordScale, setWordScale] = useState(1);
+  const [contextLineChars, setContextLineChars] = useState(42);
 
   const timeoutRef = useRef(null);
   const epubRef = useRef(null);
   const wordWrapperRef = useRef(null);
+  const contextRef = useRef(null);
   const chapterStarts = useMemo(() => {
     if (!toc || toc.length === 0) return [];
     const starts = toc
@@ -683,17 +685,87 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const leftPart = `${leading}${(core || currentWord).slice(0, orp)}`;
   const centerChar = (core || currentWord)[orp] || "";
   const rightPart = `${(core || currentWord).slice(orp + 1)}${trailing}`;
-  const contextWindow = useMemo(() => {
+  const contextLines = useMemo(() => {
     if (!altReadingMode || words.length === 0) return [];
-    const radius = 6;
-    const start = Math.max(0, currentIndex - radius);
-    const end = Math.min(words.length - 1, currentIndex + radius);
-    const items = [];
-    for (let i = start; i <= end; i += 1) {
-      items.push({ word: words[i], index: i });
+    const maxChars = Math.max(18, contextLineChars);
+    const linesBefore = 3;
+    const linesAfter = 3;
+    const current = words[currentIndex] || "";
+
+    let left = currentIndex - 1;
+    let right = currentIndex + 1;
+    const leftWords = [];
+    const rightWords = [];
+    let lineLen = current.length || 0;
+    let takeLeft = true;
+
+    while (left >= 0 || right < words.length) {
+      let added = false;
+      if (takeLeft && left >= 0) {
+        const w = words[left];
+        const add = w.length + 1;
+        if (lineLen + add <= maxChars) {
+          leftWords.unshift(w);
+          lineLen += add;
+          left -= 1;
+          added = true;
+        }
+      }
+      if (!added && right < words.length) {
+        const w = words[right];
+        const add = w.length + 1;
+        if (lineLen + add <= maxChars) {
+          rightWords.push(w);
+          lineLen += add;
+          right += 1;
+          added = true;
+        }
+      }
+      if (!added) break;
+      takeLeft = !takeLeft;
     }
-    return items;
-  }, [altReadingMode, words, currentIndex]);
+
+    const before = [];
+    let leftIdx = left;
+    for (let i = 0; i < linesBefore && leftIdx >= 0; i += 1) {
+      const lineWords = [];
+      let len = 0;
+      while (leftIdx >= 0) {
+        const w = words[leftIdx];
+        const add = w.length + (len > 0 ? 1 : 0);
+        if (len + add > maxChars && len > 0) break;
+        lineWords.unshift(w);
+        len += add;
+        leftIdx -= 1;
+      }
+      if (lineWords.length > 0) before.unshift({ text: lineWords.join(" "), distance: linesBefore - i });
+    }
+
+    const after = [];
+    let rightIdx = right;
+    for (let i = 0; i < linesAfter && rightIdx < words.length; i += 1) {
+      const lineWords = [];
+      let len = 0;
+      while (rightIdx < words.length) {
+        const w = words[rightIdx];
+        const add = w.length + (len > 0 ? 1 : 0);
+        if (len + add > maxChars && len > 0) break;
+        lineWords.push(w);
+        len += add;
+        rightIdx += 1;
+      }
+      if (lineWords.length > 0) after.push({ text: lineWords.join(" "), distance: i + 1 });
+    }
+
+    return {
+      before,
+      current: {
+        leftText: leftWords.join(" "),
+        rightText: rightWords.join(" "),
+      },
+      after
+    };
+  }, [altReadingMode, words, currentIndex, contextLineChars]);
 
   useLayoutEffect(() => {
     const updateScale = () => {
@@ -717,6 +789,20 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
     window.addEventListener("resize", updateScale);
     return () => window.removeEventListener("resize", updateScale);
   }, [currentWord, fontSize, wordScale]);
+
+  useLayoutEffect(() => {
+    if (!altReadingMode) return;
+    const updateContextWidth = () => {
+      const node = contextRef.current;
+      const width = node?.clientWidth || window.innerWidth;
+      const avgCharWidth = fontSize * 0.55;
+      const next = Math.max(18, Math.floor((width - 48) / avgCharWidth));
+      if (next !== contextLineChars) setContextLineChars(next);
+    };
+    updateContextWidth();
+    window.addEventListener("resize", updateContextWidth);
+    return () => window.removeEventListener("resize", updateContextWidth);
+  }, [altReadingMode, fontSize, contextLineChars]);
 
   const minutesLeft = wpm > 0 ? Math.floor((words.length - currentIndex) / wpm) : 0;
   const progressPercent = words.length > 0 ? Math.floor((currentIndex / words.length) * 100) : 0;
@@ -785,36 +871,57 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
               </div>
             )}
             {altReadingMode && (
-              <div className="relative flex flex-col items-center justify-center max-h-[70vh] overflow-hidden">
-                <div className="flex flex-col items-center gap-3">
-                  {contextWindow.map(({ word, index }) => {
-                    if (index === currentIndex) {
-                      return (
-                        <div
-                          key={index}
-                          ref={wordWrapperRef}
-                          className="font-serif flex items-baseline leading-none select-none relative"
-                          style={{
-                            fontSize: `${fontSize}px`,
-                            transform: `scale(${wordScale})`,
-                            transformOrigin: "center center",
-                            maxWidth: "92vw"
-                          }}
-                        >
-                          <div className="flex justify-end w-[45vw] text-right whitespace-nowrap">{leftPart}</div>
-                          <div className={`${darkMode ? 'text-red-500' : 'text-red-600'} font-bold w-auto text-center px-[1px]`}>{centerChar}</div>
-                          <div className="flex justify-start w-[45vw] text-left whitespace-nowrap">{rightPart}</div>
-                          <div className={`absolute left-1/2 -translate-x-1/2 top-[-20px] bottom-[-20px] w-[2px] opacity-10 ${darkMode ? 'bg-red-500' : 'bg-red-600'}`}></div>
-                        </div>
-                      );
-                    }
+              <div
+                ref={contextRef}
+                className="relative flex flex-col items-center justify-center max-h-[52vh] w-full overflow-hidden px-4"
+              >
+                <div className="flex flex-col items-stretch w-full gap-2">
+                  {contextLines.before.map((line, idx) => {
+                    const distance = line.distance;
+                    const scale = Math.max(0.35, 1 - 0.2 * distance);
+                    const opacity = distance === 1 ? 0.6 : distance === 2 ? 0.45 : 0.35;
                     return (
                       <div
-                        key={index}
-                        className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} opacity-70`}
-                        style={{ fontSize: `${Math.max(24, fontSize - 14)}px` }}
+                        key={`before-${idx}`}
+                        className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} whitespace-nowrap overflow-hidden`}
+                        style={{ fontSize: `${fontSize * scale}px`, opacity }}
                       >
-                        {word}
+                        {line.text}
+                      </div>
+                    );
+                  })}
+
+                  <div
+                    ref={wordWrapperRef}
+                    className="font-serif flex items-baseline leading-none select-none relative"
+                    style={{
+                      fontSize: `${fontSize}px`,
+                      transform: `scale(${wordScale})`,
+                      transformOrigin: "center center",
+                      maxWidth: "92vw"
+                    }}
+                  >
+                    <div className="flex justify-end w-[45vw] text-right whitespace-nowrap">
+                      {contextLines.current?.leftText ? `${contextLines.current.leftText} ${leftPart}` : leftPart}
+                    </div>
+                    <div className={`${darkMode ? 'text-red-500' : 'text-red-600'} font-bold w-auto text-center px-[1px]`}>{centerChar}</div>
+                    <div className="flex justify-start w-[45vw] text-left whitespace-nowrap">
+                      {contextLines.current?.rightText ? `${rightPart} ${contextLines.current.rightText}` : rightPart}
+                    </div>
+                    <div className={`absolute left-1/2 -translate-x-1/2 top-[-20px] bottom-[-20px] w-[2px] opacity-10 ${darkMode ? 'bg-red-500' : 'bg-red-600'}`}></div>
+                  </div>
+
+                  {contextLines.after.map((line, idx) => {
+                    const distance = line.distance;
+                    const scale = Math.max(0.35, 1 - 0.2 * distance);
+                    const opacity = distance === 1 ? 0.6 : distance === 2 ? 0.45 : 0.35;
+                    return (
+                      <div
+                        key={`after-${idx}`}
+                        className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} whitespace-nowrap overflow-hidden`}
+                        style={{ fontSize: `${fontSize * scale}px`, opacity }}
+                      >
+                        {line.text}
                       </div>
                     );
                   })}
