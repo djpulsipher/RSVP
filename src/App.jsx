@@ -57,11 +57,17 @@ const splitWord = (word) => {
   return { leading: match[1], core: match[2], trailing: match[3] };
 };
 
+const normalizeTrailingForPause = (trailing) => {
+  if (!trailing) return "";
+  return trailing.replace(/["'”’)\]\}»]+$/g, "");
+};
+
 const getPauseMultiplier = (word) => {
   const { trailing } = splitWord(word);
-  if (/[.?!…]+$/.test(trailing)) return 2.6;
-  if (/[:;]+$/.test(trailing)) return 1.9;
-  if (/,+$/.test(trailing)) return 1.4;
+  const cleanedTrailing = normalizeTrailingForPause(trailing);
+  if (/[.?!…]+$/.test(cleanedTrailing)) return 2.6;
+  if (/[:;]+$/.test(cleanedTrailing)) return 1.9;
+  if (/,+$/.test(cleanedTrailing)) return 1.4;
   if (/—|–|--/.test(word)) return 1.6;
   return 1;
 };
@@ -398,6 +404,7 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [wpm, setWpm] = useState(300);
+  const [altReadingMode, setAltReadingMode] = useState(false);
   const [bookmarks, setBookmarks] = useState([]); 
   const [toc, setToc] = useState([]);
   const [showToc, setShowToc] = useState(false);
@@ -410,6 +417,16 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const timeoutRef = useRef(null);
   const epubRef = useRef(null);
   const wordWrapperRef = useRef(null);
+  const chapterStarts = useMemo(() => {
+    if (!toc || toc.length === 0) return [];
+    const starts = toc
+      .map((item) => item.index)
+      .filter((idx) => Number.isFinite(idx))
+      .sort((a, b) => a - b);
+    if (starts.length === 0) return [];
+    if (starts[0] !== 0) starts.unshift(0);
+    return Array.from(new Set(starts));
+  }, [toc]);
 
   // --- Persistence inside Reader ---
   useEffect(() => {
@@ -418,14 +435,15 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
      if (savedSettings) {
          if (savedSettings.wpm) setWpm(savedSettings.wpm);
          if (savedSettings.fontSize) setFontSize(savedSettings.fontSize);
+         if (savedSettings.altReadingMode !== undefined) setAltReadingMode(savedSettings.altReadingMode);
      }
   }, []);
 
   // Save settings change
   useEffect(() => {
       const current = JSON.parse(localStorage.getItem('speedreader-settings') || '{}');
-      localStorage.setItem('speedreader-settings', JSON.stringify({ ...current, wpm, fontSize }));
-  }, [wpm, fontSize]);
+      localStorage.setItem('speedreader-settings', JSON.stringify({ ...current, wpm, fontSize, altReadingMode }));
+  }, [wpm, fontSize, altReadingMode]);
 
   // Save Book Progress (Debounced slightly by effect nature)
   useEffect(() => {
@@ -635,12 +653,27 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
                   setIsPlaying(false);
                   return prev;
               }
+              if (chapterStarts.length > 1) {
+                  let nextStart = null;
+                  for (let i = 0; i < chapterStarts.length; i += 1) {
+                      if (chapterStarts[i] > prev) {
+                          nextStart = chapterStarts[i];
+                          break;
+                      }
+                  }
+                  if (nextStart !== null) {
+                      const chapterEnd = nextStart - 1;
+                      if (prev >= chapterEnd) {
+                          return nextStart;
+                      }
+                  }
+              }
               return prev + 1;
           });
       }, ms);
 
       return () => clearTimeout(timeoutRef.current);
-  }, [isPlaying, wpm, words.length, currentIndex]);
+  }, [isPlaying, wpm, words.length, currentIndex, chapterStarts]);
 
 
   // --- Rendering ---
@@ -650,6 +683,17 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const leftPart = `${leading}${(core || currentWord).slice(0, orp)}`;
   const centerChar = (core || currentWord)[orp] || "";
   const rightPart = `${(core || currentWord).slice(orp + 1)}${trailing}`;
+  const contextWindow = useMemo(() => {
+    if (!altReadingMode || words.length === 0) return [];
+    const radius = 6;
+    const start = Math.max(0, currentIndex - radius);
+    const end = Math.min(words.length - 1, currentIndex + radius);
+    const items = [];
+    for (let i = start; i <= end; i += 1) {
+      items.push({ word: words[i], index: i });
+    }
+    return items;
+  }, [altReadingMode, words, currentIndex]);
 
   useLayoutEffect(() => {
     const updateScale = () => {
@@ -723,21 +767,60 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
             </div>
 
             {/* Word */}
-            <div
-                ref={wordWrapperRef}
-                className="font-serif flex items-baseline leading-none select-none relative"
-                style={{
-                  fontSize: `${fontSize}px`,
-                  transform: `scale(${wordScale})`,
-                  transformOrigin: "center center",
-                  maxWidth: "92vw"
-                }}
-            >
-                <div className="flex justify-end w-[45vw] text-right whitespace-nowrap">{leftPart}</div>
-                <div className={`${darkMode ? 'text-red-500' : 'text-red-600'} font-bold w-auto text-center px-[1px]`}>{centerChar}</div>
-                <div className="flex justify-start w-[45vw] text-left whitespace-nowrap">{rightPart}</div>
-                <div className={`absolute left-1/2 -translate-x-1/2 top-[-20px] bottom-[-20px] w-[2px] opacity-10 ${darkMode ? 'bg-red-500' : 'bg-red-600'}`}></div>
-            </div>
+            {!altReadingMode && (
+              <div
+                  ref={wordWrapperRef}
+                  className="font-serif flex items-baseline leading-none select-none relative"
+                  style={{
+                    fontSize: `${fontSize}px`,
+                    transform: `scale(${wordScale})`,
+                    transformOrigin: "center center",
+                    maxWidth: "92vw"
+                  }}
+              >
+                  <div className="flex justify-end w-[45vw] text-right whitespace-nowrap">{leftPart}</div>
+                  <div className={`${darkMode ? 'text-red-500' : 'text-red-600'} font-bold w-auto text-center px-[1px]`}>{centerChar}</div>
+                  <div className="flex justify-start w-[45vw] text-left whitespace-nowrap">{rightPart}</div>
+                  <div className={`absolute left-1/2 -translate-x-1/2 top-[-20px] bottom-[-20px] w-[2px] opacity-10 ${darkMode ? 'bg-red-500' : 'bg-red-600'}`}></div>
+              </div>
+            )}
+            {altReadingMode && (
+              <div className="relative flex flex-col items-center justify-center max-h-[70vh] overflow-hidden">
+                <div className="flex flex-col items-center gap-3">
+                  {contextWindow.map(({ word, index }) => {
+                    if (index === currentIndex) {
+                      return (
+                        <div
+                          key={index}
+                          ref={wordWrapperRef}
+                          className="font-serif flex items-baseline leading-none select-none relative"
+                          style={{
+                            fontSize: `${fontSize}px`,
+                            transform: `scale(${wordScale})`,
+                            transformOrigin: "center center",
+                            maxWidth: "92vw"
+                          }}
+                        >
+                          <div className="flex justify-end w-[45vw] text-right whitespace-nowrap">{leftPart}</div>
+                          <div className={`${darkMode ? 'text-red-500' : 'text-red-600'} font-bold w-auto text-center px-[1px]`}>{centerChar}</div>
+                          <div className="flex justify-start w-[45vw] text-left whitespace-nowrap">{rightPart}</div>
+                          <div className={`absolute left-1/2 -translate-x-1/2 top-[-20px] bottom-[-20px] w-[2px] opacity-10 ${darkMode ? 'bg-red-500' : 'bg-red-600'}`}></div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        key={index}
+                        className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} opacity-70`}
+                        style={{ fontSize: `${Math.max(24, fontSize - 14)}px` }}
+                      >
+                        {word}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Info */}
             <div className="absolute bottom-8 left-8 text-xs font-mono opacity-40">
@@ -842,6 +925,15 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
             <div>
               <label className="text-xs font-bold uppercase tracking-wider opacity-50 block mb-2">Font Size ({fontSize}px)</label>
               <input type="range" min="24" max="128" value={fontSize} onChange={(e) => setFontSize(parseInt(e.target.value))} className="w-full accent-red-500 h-1 bg-gray-700/50 rounded-lg appearance-none cursor-pointer"/>
+            </div>
+            <div className="pt-2 border-t border-gray-700/50 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider opacity-50">Alt reading mode</span>
+              <button
+                onClick={() => setAltReadingMode(!altReadingMode)}
+                className={`px-3 py-1 text-xs font-bold rounded-full transition-colors ${altReadingMode ? 'bg-red-600 text-white' : darkMode ? 'bg-zinc-800 text-zinc-300' : 'bg-gray-200 text-gray-700'}`}
+              >
+                {altReadingMode ? 'On' : 'Off'}
+              </button>
             </div>
             <div className="pt-2 border-t border-gray-700/50">
                <h4 className="text-xs font-bold uppercase tracking-wider opacity-50 block mb-2">Shortcuts</h4>
