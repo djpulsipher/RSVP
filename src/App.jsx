@@ -687,7 +687,7 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
   const rightPart = `${(core || currentWord).slice(orp + 1)}${trailing}`;
   const contextLines = useMemo(() => {
     if (!altReadingMode || words.length === 0) return [];
-    const maxChars = Math.max(18, contextLineChars);
+    const maxChars = Math.max(24, contextLineChars);
     const linesBefore = 3;
     const linesAfter = 3;
     let left = currentIndex - 1;
@@ -760,7 +760,7 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
     const updateContextWidth = () => {
       const node = contextRef.current;
       const width = node?.clientWidth || window.innerWidth;
-      const avgCharWidth = fontSize * 0.55;
+      const avgCharWidth = fontSize * 0.4;
       const next = Math.max(18, Math.floor((width - 48) / avgCharWidth));
       if (next !== contextLineChars) setContextLineChars(next);
     };
@@ -843,13 +843,13 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
                 <div className="flex flex-col items-stretch w-full gap-2">
                   {contextLines.before.map((line, idx) => {
                     const distance = line.distance;
-                    const scale = Math.max(0.35, 1 - 0.2 * distance);
-                    const opacity = distance === 1 ? 0.6 : distance === 2 ? 0.45 : 0.35;
+                    const scale = Math.max(0.02, 0.25 * Math.pow(1 / 3, distance - 1));
+                    const opacity = distance === 1 ? 0.5 : distance === 2 ? 0.4 : 0.3;
                     return (
                       <div
                         key={`before-${idx}`}
                         className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} overflow-hidden`}
-                        style={{ fontSize: `${fontSize * scale}px`, opacity, textAlign: "justify", textAlignLast: "justify", width: "100%" }}
+                        style={{ fontSize: `${fontSize * scale}px`, opacity, textAlign: "left", textAlignLast: "left", width: "100%", wordSpacing: "0px" }}
                       >
                         {line.text}
                       </div>
@@ -874,13 +874,13 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
 
                   {contextLines.after.map((line, idx) => {
                     const distance = line.distance;
-                    const scale = Math.max(0.35, 1 - 0.2 * distance);
-                    const opacity = distance === 1 ? 0.6 : distance === 2 ? 0.45 : 0.35;
+                    const scale = Math.max(0.02, 0.25 * Math.pow(1 / 3, distance - 1));
+                    const opacity = distance === 1 ? 0.5 : distance === 2 ? 0.4 : 0.3;
                     return (
                       <div
                         key={`after-${idx}`}
                         className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} overflow-hidden`}
-                        style={{ fontSize: `${fontSize * scale}px`, opacity, textAlign: "justify", textAlignLast: "justify", width: "100%" }}
+                        style={{ fontSize: `${fontSize * scale}px`, opacity, textAlign: "left", textAlignLast: "left", width: "100%", wordSpacing: "0px" }}
                       >
                         {line.text}
                       </div>
