@@ -690,40 +690,8 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
     const maxChars = Math.max(18, contextLineChars);
     const linesBefore = 3;
     const linesAfter = 3;
-    const current = words[currentIndex] || "";
-
     let left = currentIndex - 1;
     let right = currentIndex + 1;
-    const leftWords = [];
-    const rightWords = [];
-    let lineLen = current.length || 0;
-    let takeLeft = true;
-
-    while (left >= 0 || right < words.length) {
-      let added = false;
-      if (takeLeft && left >= 0) {
-        const w = words[left];
-        const add = w.length + 1;
-        if (lineLen + add <= maxChars) {
-          leftWords.unshift(w);
-          lineLen += add;
-          left -= 1;
-          added = true;
-        }
-      }
-      if (!added && right < words.length) {
-        const w = words[right];
-        const add = w.length + 1;
-        if (lineLen + add <= maxChars) {
-          rightWords.push(w);
-          lineLen += add;
-          right += 1;
-          added = true;
-        }
-      }
-      if (!added) break;
-      takeLeft = !takeLeft;
-    }
 
     const before = [];
     let leftIdx = left;
@@ -738,8 +706,9 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
         len += add;
         leftIdx -= 1;
       }
-      if (lineWords.length > 0) before.unshift({ text: lineWords.join(" "), distance: linesBefore - i });
+      if (lineWords.length > 0) before.push({ text: lineWords.join(" "), distance: i + 1 });
     }
+    before.reverse();
 
     const after = [];
     let rightIdx = right;
@@ -759,10 +728,6 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
 
     return {
       before,
-      current: {
-        leftText: leftWords.join(" "),
-        rightText: rightWords.join(" "),
-      },
       after
     };
   }, [altReadingMode, words, currentIndex, contextLineChars]);
@@ -873,7 +838,7 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
             {altReadingMode && (
               <div
                 ref={contextRef}
-                className="relative flex flex-col items-center justify-center max-h-[52vh] w-full overflow-hidden px-4"
+                className="relative flex flex-col items-center justify-center max-h-[52vh] w-full overflow-hidden px-6"
               >
                 <div className="flex flex-col items-stretch w-full gap-2">
                   {contextLines.before.map((line, idx) => {
@@ -883,8 +848,8 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
                     return (
                       <div
                         key={`before-${idx}`}
-                        className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} whitespace-nowrap overflow-hidden`}
-                        style={{ fontSize: `${fontSize * scale}px`, opacity }}
+                        className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} overflow-hidden`}
+                        style={{ fontSize: `${fontSize * scale}px`, opacity, textAlign: "justify", textAlignLast: "justify", width: "100%" }}
                       >
                         {line.text}
                       </div>
@@ -901,13 +866,9 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
                       maxWidth: "92vw"
                     }}
                   >
-                    <div className="flex justify-end w-[45vw] text-right whitespace-nowrap">
-                      {contextLines.current?.leftText ? `${contextLines.current.leftText} ${leftPart}` : leftPart}
-                    </div>
+                    <div className="flex justify-end w-[45vw] text-right whitespace-nowrap">{leftPart}</div>
                     <div className={`${darkMode ? 'text-red-500' : 'text-red-600'} font-bold w-auto text-center px-[1px]`}>{centerChar}</div>
-                    <div className="flex justify-start w-[45vw] text-left whitespace-nowrap">
-                      {contextLines.current?.rightText ? `${rightPart} ${contextLines.current.rightText}` : rightPart}
-                    </div>
+                    <div className="flex justify-start w-[45vw] text-left whitespace-nowrap">{rightPart}</div>
                     <div className={`absolute left-1/2 -translate-x-1/2 top-[-20px] bottom-[-20px] w-[2px] opacity-10 ${darkMode ? 'bg-red-500' : 'bg-red-600'}`}></div>
                   </div>
 
@@ -918,8 +879,8 @@ function Reader({ book, onBack, onUpdateProgress, darkMode, toggleDarkMode }) {
                     return (
                       <div
                         key={`after-${idx}`}
-                        className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} whitespace-nowrap overflow-hidden`}
-                        style={{ fontSize: `${fontSize * scale}px`, opacity }}
+                        className={`font-serif leading-none select-none ${darkMode ? 'text-zinc-400' : 'text-gray-500'} overflow-hidden`}
+                        style={{ fontSize: `${fontSize * scale}px`, opacity, textAlign: "justify", textAlignLast: "justify", width: "100%" }}
                       >
                         {line.text}
                       </div>
